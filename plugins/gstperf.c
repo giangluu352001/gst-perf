@@ -185,9 +185,11 @@ gst_perf_class_init (GstPerfClass * klass)
           "Interval between two calculations in ms, this will run even when no buffers are received",
           0, G_MAXINT, DEFAULT_BITRATE_INTERVAL, G_PARAM_WRITABLE));
 
-  gst_perf_signals[SIGNAL_ON_BITRATE] =
-      g_signal_new ("on-bitrate", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_DOUBLE);
+  gst_perf_signals[SIGNAL_ON_BITRATE] = g_signal_new ("on-bitrate", G_TYPE_FROM_CLASS (klass),
+    G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, 
+    G_TYPE_DOUBLE, // mean_bps
+    G_TYPE_DOUBLE  // fps
+  );
 
   base_transform_class->start = GST_DEBUG_FUNCPTR (gst_perf_start);
   base_transform_class->stop = GST_DEBUG_FUNCPTR (gst_perf_stop);
@@ -292,7 +294,7 @@ gst_perf_update_bps (void *data)
   guint buffer_current_idx;
   GstPerf *perf;
   guint byte_count;
-  gdouble bps, mean_bps;
+  gdouble bps, mean_bps, fps;
 
   g_return_val_if_fail (data, FALSE);
 
@@ -316,11 +318,6 @@ gst_perf_update_bps (void *data)
   if (!perf->bps_window_size) {
     mean_bps = gst_perf_update_average (perf->byte_count_total, bps, mean_bps);
   } else {
-    /*
-     * Moving average uses a circular buffer, get index for next value which
-     * is the oldest sample, this is the same as the value were the new sample
-     * is to be stored
-     */
     buffer_current_idx = (perf->byte_count_total) % perf->bps_window_size;
 
     mean_bps =
@@ -329,6 +326,7 @@ gst_perf_update_bps (void *data)
 
     perf->bps_window_buffer[buffer_current_idx] = bps;
   }
+
   g_mutex_lock (&perf->mean_bps_mutex);
   perf->mean_bps = mean_bps;
   g_mutex_unlock (&perf->mean_bps_mutex);
@@ -337,9 +335,12 @@ gst_perf_update_bps (void *data)
   perf->bps = bps;
   g_mutex_unlock (&perf->bps_mutex);
 
+  /* Read current fps */
+  fps = perf->fps;
+
   perf->byte_count_total++;
 
-  g_signal_emit_by_name (perf, "on-bitrate", mean_bps);
+  g_signal_emit_by_name (perf, "on-bitrate", mean_bps, fps);
 
   return TRUE;
 }
